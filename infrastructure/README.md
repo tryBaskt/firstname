@@ -1,8 +1,14 @@
 # Development DynamoDB tables
 
-Terraform in `dev/` defines only two dev tables in Baskt account `499133675835`.
-No prod resources, GitHub deployment wiring, compute, schedules, or ingestion
-changes are included.
+Terraform in `dev/` defines two dev tables in Baskt account `499133675835`,
+region `us-east-1`. Production, compute, schedules, and ingestion changes are
+not included. All FirstName resources use `firstname-<env>-<purpose>` names.
+
+The only shared AWS resource is the existing GitHub OIDC provider, referenced
+read-only. `bootstrap/` manages FirstName's dedicated private, encrypted,
+versioned state bucket and dev deployment role. It must be run with administrative
+credentials; GitHub's role cannot manage IAM, the bucket configuration, or Baskt
+resources. It cannot delete the dev tables or read/write their job items.
 
 | Table | Partition key | Sort key |
 | --- | --- | --- |
@@ -25,10 +31,10 @@ No TTL is configured. Items must fit DynamoDB's 400 KB limit.
 
 ## Validate
 
-Run from `infrastructure/dev/` with Terraform 1.7+:
+Run from `infrastructure/dev/` with Terraform 1.10+:
 
 ```sh
-terraform init
+AWS_PROFILE=siby_baskt terraform init
 terraform fmt -check
 terraform validate
 terraform test
@@ -39,15 +45,45 @@ lock file, but never Terraform state, plans, or credentials.
 
 ## Plan
 
-Select the AWS region explicitly by setting `TF_VAR_aws_region`, then run:
+The dev region is fixed to `us-east-1`. Run:
 
 ```sh
 AWS_PROFILE=siby_baskt terraform plan
 ```
 
-No apply has been run. State uses the local backend and is excluded from Git.
-Preserve state after applying. Remote state and GitHub dev/prod deployment
-routing are separate future steps. Do not use independent local state in CI.
+State is stored in `firstname-dev-tfstate-499133675835-us-east-1` with S3-native
+locking. The dev module uses `dev/terraform.tfstate`; bootstrap uses the separate
+`bootstrap/terraform.tfstate` key. Neither state nor plan files belong in Git.
+The GitHub role can access only the dev state and its lock, not bootstrap state.
+
+## GitHub deployment
+
+`.github/workflows/terraform-dev.yml` validates on pull requests and deploys on
+infrastructure pushes to `dev` or `feature/*`. Manual runs are also available on
+those branches. All feature branches share the same dev tables and state.
+Feature names use one segment, e.g. `feature/add-sequoia`. Other branches and
+tags cannot deploy. Production is intentionally not configured.
+
+The GitHub `dev` environment permits only the `dev` and `feature/*` branch
+patterns. Its non-secret variables are `AWS_REGION=us-east-1` and
+`AWS_ROLE_ARN=arn:aws:iam::499133675835:role/firstname-dev-github-deploy`.
+OIDC trust matches this repository's immutable ID-based subject and the `dev`
+environment. No AWS access keys are stored on GitHub.
+
+The workflow validates, runs mocked tests, and applies its saved Terraform plan.
+Deployment jobs are serialized without interrupting a running apply; GitHub
+may replace an older pending deployment with a newer pending one. S3 locking
+also protects against overlapping local applies.
+
+## Bootstrap maintenance
+
+From `infrastructure/bootstrap/`, use `AWS_PROFILE=siby_baskt terraform init`,
+then `AWS_PROFILE=siby_baskt terraform plan` to review changes. Bootstrap is
+intentionally not auto-applied by GitHub. The bucket and role are dedicated to
+FirstName; do not import or manage the existing OIDC provider in this module.
+For a fresh account, create the bucket with local state before enabling its S3
+backend, then migrate state. Never re-bootstrap this deployed setup with empty
+local state.
 
 Intentional deletion requires removing `prevent_destroy` and disabling AWS
 deletion protection. Removing a resource block also removes its lifecycle guard.

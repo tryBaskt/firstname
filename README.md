@@ -15,16 +15,19 @@ Verify identities and current employment before labeling matches as confirmed. M
 ## Infrastructure target
 
 - GitHub organization: `tryBaskt`
-- Intended repository: `firstname` (public)
+- Repository: `tryBaskt/firstname` (public), default branch `dev`
 - AWS account: `499133675835`
 - Local AWS profile: `siby_baskt`
-- AWS region: not selected yet
+- AWS region: `us-east-1`
 
-AWS identity has been verified. GitHub repository creation and deployment are pending. No AWS infrastructure has been deployed.
+FirstName uses dedicated `firstname-dev-*` AWS resources. Only the account's
+GitHub OIDC provider is shared with Baskt. The Terraform state bucket and dev
+deployment role are provisioned; table deployment runs through GitHub Actions.
 
 Terraform for the two development DynamoDB tables is in `infrastructure/dev/`.
-See `infrastructure/README.md` for the schema and validation commands. Production
-and GitHub dev/prod routing are deferred. Ingestion still uses local SQLite;
+See `infrastructure/README.md` for the schema and deployment workflow. Pushes
+to `dev` or `feature/*` deploy dev infrastructure; production is deferred.
+Ingestion still uses local SQLite;
 connecting the Python batches to DynamoDB is separate.
 
 ## Credentials
@@ -71,6 +74,5 @@ python3 -m unittest discover -s tests -v
 ```
 
 Scheduling the `new` batch is a separate step. No recurring schedule is active.
-The website, Gemini integration, and cloud deployment are not implemented yet.
-Earlier JavaScript and infrastructure drafts remain in the repository but are
-not part of this Python workflow.
+The website, Gemini integration, and batch compute deployment are not implemented
+yet. Terraform deployment covers development infrastructure only.

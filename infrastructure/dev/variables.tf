@@ -1,9 +1,10 @@
 variable "aws_region" {
-  description = "AWS region for dev tables. Must be selected explicitly."
+  description = "AWS region for dev tables."
   type        = string
+  default     = "us-east-1"
 
   validation {
-    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]+$", var.aws_region))
-    error_message = "Provide an AWS region such as us-east-1."
+    condition     = var.aws_region == "us-east-1"
+    error_message = "Development infrastructure is deployed in us-east-1."
   }
 }
