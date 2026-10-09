@@ -51,8 +51,9 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          allowed-account-ids: '499133675835'
           role-session-name: firstname-dev-${{ github.run_id }}
+      - name: Verify AWS account
+        run: test "$(aws sts get-caller-identity --query Account --output text)" = '499133675835'
       - name: Initialize isolated crawler state
         working-directory: web_crawl_svc/infrastructure/dev
         run: terraform init -lockfile=readonly
