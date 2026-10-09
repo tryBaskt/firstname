@@ -76,7 +76,10 @@ resource "aws_iam_role_policy" "crawler_deploy" {
       Condition = { ArnEquals = { "lambda:FunctionArn" = local.functions } } },
       { Sid = "MappingTags", Effect = "Allow", Action = ["lambda:ListTags", "lambda:TagResource", "lambda:UntagResource"], Resource = "arn:aws:lambda:us-east-1:${local.account}:event-source-mapping:*",
       Condition = { StringEquals = { "aws:ResourceTag/Project" = "firstname", "aws:ResourceTag/Environment" = "dev" } } },
-      { Sid = "Logs", Effect = "Allow", Action = ["logs:*"], Resource = "arn:aws:logs:us-east-1:${local.account}:log-group:/aws/lambda/${local.prefix}-*:*" },
+      { Sid = "Logs", Effect = "Allow", Action = ["logs:*"], Resource = [
+        "arn:aws:logs:us-east-1:${local.account}:log-group:/aws/lambda/${local.prefix}-*",
+        "arn:aws:logs:us-east-1:${local.account}:log-group:/aws/lambda/${local.prefix}-*:*"
+      ] },
       { Sid = "ListLogGroups", Effect = "Allow", Action = ["logs:DescribeLogGroups"], Resource = "*" },
       { Sid = "CreateBoundedRoles", Effect = "Allow", Action = ["iam:CreateRole", "iam:PutRolePermissionsBoundary"], Resource = local.roles,
       Condition = { StringEquals = { "iam:PermissionsBoundary" = aws_iam_policy.runtime_boundary.arn } } },
