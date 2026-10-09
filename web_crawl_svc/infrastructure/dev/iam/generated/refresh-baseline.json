@@ -1,0 +1,71 @@
+{
+  "Policies": [
+    {
+      "Policy": {
+        "Id": "IamPolicyAutopilot",
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:ConditionCheckItem",
+              "dynamodb:DeleteItem",
+              "dynamodb:GetItem",
+              "dynamodb:PutItem",
+              "dynamodb:Query",
+              "dynamodb:ReadDataForReplication",
+              "dynamodb:Scan",
+              "dynamodb:UpdateItem",
+              "dynamodb:WriteDataForReplication"
+            ],
+            "Resource": [
+              "arn:aws:dynamodb:us-east-1:499133675835:table/*"
+            ]
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kms:Decrypt"
+            ],
+            "Resource": [
+              "arn:aws:kms:us-east-1:499133675835:key/*"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "kms:ViaService": [
+                  "dynamodb.us-east-1.amazonaws.com"
+                ]
+              }
+            }
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kms:GenerateDataKey"
+            ],
+            "Resource": [
+              "arn:aws:kms:us-east-1:499133675835:key/*"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "kms:ViaService": [
+                  "sqs.us-east-1.amazonaws.com"
+                ]
+              }
+            }
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:SendMessage"
+            ],
+            "Resource": [
+              "arn:aws:sqs:us-east-1:499133675835:*"
+            ]
+          }
+        ]
+      },
+      "PolicyType": "Identity"
+    }
+  ]
+}

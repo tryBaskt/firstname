@@ -1,78 +1,25 @@
 # FirstName
 
-Startup jobs with school and previous-employer connections.
+Internal job-board crawler that follows VC portfolio job links and verifies
+individual employer postings through Ashby, Greenhouse, and Lever public APIs.
+Verified API data is persisted with deterministic employer job identities.
 
-## Planned workflow
+## Development
 
-1. Aggregate jobs from VC portfolio job boards.
-2. Accept an applicant's schools and previous employers.
-3. Use Gemini with Google Search grounding to discover potential employee matches.
-4. Research matching people's public personal sites and professional bios.
-5. Display supported shared-background matches and publicly listed professional contact channels with source links.
-
-Verify identities and current employment before labeling matches as confirmed. Missing contact details remain missing.
-
-## Infrastructure target
-
-- GitHub organization: `tryBaskt`
-- Repository: `tryBaskt/firstname` (public), default branch `dev`
-- AWS account: `499133675835`
-- Local AWS profile: `siby_baskt`
-- AWS region: `us-east-1`
-
-FirstName uses dedicated `firstname-dev-*` AWS resources. Only the account's
-GitHub OIDC provider is shared with Baskt. The Terraform state bucket and dev
-deployment role are provisioned; table deployment runs through GitHub Actions.
-
-Terraform for the two development DynamoDB tables is in `infrastructure/dev/`.
-See `infrastructure/README.md` for the schema and deployment workflow. Pushes
-to `dev` or `feature/*` deploy dev infrastructure; production is deferred.
-Ingestion still uses local SQLite;
-connecting the Python batches to DynamoDB is separate.
-
-## Credentials
-
-Gemini requires Google API access separately from AWS. Configure its key through a secret store or server-side environment configuration; never commit it or send it to the browser.
-
-## Python batch jobs
-
-Requires Python 3.10+ on macOS or Linux. Uses the standard library only.
-Run these commands from the repository directory.
-
-One-time initial import of every a16z portfolio listing:
+Python 3.12 or newer:
 
 ```sh
-python3 -m firstname_jobs initial
+python3 -m venv .venv
+.venv/bin/pip install -e './web_crawl_svc[dev]'
+.venv/bin/pytest web_crawl_svc/tests
 ```
 
-Subsequent batch to insert newly discovered listings:
+## Deployment
 
-```sh
-python3 -m firstname_jobs new
-```
+GitHub Actions builds the Lambda container image and deploys the dev Terraform
+stack for pushes to `dev` or `feature/*`. Recurring schedules remain disabled
+until explicitly enabled. No public routes or APIs are deployed.
 
-Both batches read the public company directory and each hiring company's job
-pages from https://jobs.a16z.com/jobs, avoiding the global 100-page limit. Three
-workers collect these partitions, and the combined count must match the board.
-The public board has
-no verified change feed, so the recurring batch compares stable source IDs and
-inserts only unseen jobs. It does not overwrite existing jobs or remove missing
-ones. This also catches older listings that appear on the board later.
-
-Jobs and successful batch history are stored in `data/jobs.sqlite3`, excluded
-from Git. Each job retains its complete source data in `raw_json`. The import
-checks pagination and the exact unique job count before committing. Failed
-imports preserve the previous data, and a file lock prevents overlapping runs.
-The initial command refuses to run again after a successful baseline import.
-This imports listing data supplied by the a16z board. Full descriptions on
-individual companies' application pages are not fetched in this step.
-
-Tests:
-
-```sh
-python3 -m unittest discover -s tests -v
-```
-
-Scheduling the `new` batch is a separate step. No recurring schedule is active.
-The website, Gemini integration, and batch compute deployment are not implemented
-yet. Terraform deployment covers development infrastructure only.
+See [crawler infrastructure](web_crawl_svc/infrastructure/README.md).
+Application environment variables are in
+`web_crawl_svc/infrastructure/dev/environment.tf`.

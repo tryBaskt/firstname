@@ -1,72 +1,92 @@
-name: Deploy Dev Infrastructure
-
+name: Deploy Dev Crawler
 on:
   push:
     branches: [dev, 'feature/*']
-    paths:
-      - 'infrastructure/dev/**'
-      - '.github/workflows/terraform-dev.yml'
+    paths: ['web_crawl_svc/**', '.github/workflows/terraform-dev.yml', '.dockerignore']
   pull_request:
-    paths:
-      - 'infrastructure/dev/**'
-      - '.github/workflows/terraform-dev.yml'
+    branches: [dev]
   workflow_dispatch:
-
 permissions:
   contents: read
-
-env:
-  TF_IN_AUTOMATION: 'true'
-  TF_INPUT: 'false'
-
+concurrency:
+  group: firstname-dev-crawler-deploy
+  cancel-in-progress: false
 jobs:
   validate:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infrastructure/dev
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
-          terraform_version: '1.15.7'
-          terraform_wrapper: false
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false -lockfile=readonly
-      - run: terraform validate
-      - run: terraform test
-
+          terraform_version: 1.15.7
+      - name: Test Python package
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install './web_crawl_svc[dev]'
+          .venv/bin/python -m pytest web_crawl_svc/tests -q
+      - name: Validate Terraform
+        working-directory: web_crawl_svc/infrastructure/dev
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -lockfile=readonly
+          terraform validate
   deploy:
     needs: validate
-    if: >-
-      github.event_name != 'pull_request' && github.ref_type == 'branch' &&
-      (github.ref_name == 'dev' || startsWith(github.ref_name, 'feature/'))
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/feature/'))
+    runs-on: ubuntu-24.04
     environment: dev
-    concurrency:
-      group: firstname-dev-terraform
-      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
-    defaults:
-      run:
-        working-directory: infrastructure/dev
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_IN_AUTOMATION: true
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
-          terraform_version: '1.15.7'
+          terraform_version: 1.15.7
           terraform_wrapper: false
-      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
           allowed-account-ids: '499133675835'
           role-session-name: firstname-dev-${{ github.run_id }}
-      - run: terraform init -lockfile=readonly
-      - run: terraform plan -lock-timeout=5m -out=deployment.tfplan
-      - run: terraform apply -lock-timeout=5m deployment.tfplan
+      - name: Initialize isolated crawler state
+        working-directory: web_crawl_svc/infrastructure/dev
+        run: terraform init -lockfile=readonly
+      - name: Ensure image repository exists
+        working-directory: web_crawl_svc/infrastructure/dev
+        run: |
+          terraform plan -target=aws_ecr_repository.workers -lock-timeout=5m -out=ecr.tfplan
+          terraform apply -auto-approve ecr.tfplan
+      - name: Build and push Lambda image
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="$(terraform -chdir=web_crawl_svc/infrastructure/dev output -raw worker_repository_url)"
+          registry="${repository%%/*}"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          tag="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build --platform linux/amd64 --provenance=false --push \
+            --metadata-file "$RUNNER_TEMP/image.json" -f web_crawl_svc/Dockerfile -t "$repository:$tag" .
+          digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/image.json")"
+          [[ "$digest" == sha256:* ]]
+          echo "uri=$repository@$digest" >> "$GITHUB_OUTPUT"
+      - name: Plan and deploy crawler
+        working-directory: web_crawl_svc/infrastructure/dev
+        env:
+          TF_VAR_deploy_workers: 'true'
+          TF_VAR_worker_image_uri: ${{ steps.image.outputs.uri }}
+          TF_VAR_schedules_enabled: 'false'
+        run: |
+          terraform plan -lock-timeout=5m -out=deployment.tfplan
+          terraform apply -auto-approve deployment.tfplan
+      - name: Verify worker deployment
+        run: |
+          aws lambda wait function-updated-v2 --function-name firstname-dev-web-crawler
+          aws lambda wait function-updated-v2 --function-name firstname-dev-crawl-refresh
+          aws lambda get-function-configuration --function-name firstname-dev-web-crawler \
+            --query '{State:State,LastUpdateStatus:LastUpdateStatus}'
